@@ -1,0 +1,47 @@
+# Default values for lokey-client
+operator:
+  enabled: true
+  image:
+    repository: ghcr.io/lokey/client-container
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      memory: "64Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "500m"
+
+client:
+  image:
+    repository: ghcr.io/lokey/client-container
+    tag: latest
+    pullPolicy: IfNotPresent
+  initImage:
+    repository: ghcr.io/lokey/client-container-init
+    tag: latest
+    pullPolicy: IfNotPresent
+
+virtio:
+  url: "http://lokey-virtio:8083"
+  serviceName: lokey-virtio
+  servicePort: 8083
+
+config:
+  devicePaths:
+    - "/dev/lokeyrng"
+  chunkSize: 1024
+  reconnectInterval: "5s"
+  logLevel: "INFO"
+
+rbac:
+  create: true
+
+serviceAccount:
+  create: true
+  name: ""
+
+namespace:
+  create: true
+  name: lokey-system

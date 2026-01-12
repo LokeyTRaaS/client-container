@@ -1,0 +1,29 @@
+FROM golang:1.25-alpine AS builder
+
+WORKDIR /app
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the init binary
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /app/init ./cmd/init
+
+# Runtime stage - distroless is perfect for a statically compiled Go binary
+# Use static:latest (not nonroot) since we need to run as root for CAP_MKNOD
+FROM gcr.io/distroless/static:latest
+
+WORKDIR /app
+
+# Copy binary from builder
+COPY --from=builder /app/init /app/init
+
+# Run as root to allow device creation (CAP_MKNOD)
+# Distroless static:latest runs as root by default
+
+# Default arguments
+ENTRYPOINT ["/app/init"]
+CMD ["-devices", "/dev/lokeyrng", "-major", "10", "-minor", "240", "-perms", "0666"]

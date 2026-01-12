@@ -1,0 +1,123 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lokey-example
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: lokey-client
+  namespace: lokey-example
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lokey-client-config
+  namespace: lokey-example
+data:
+  LOKEY_VIRTIO_URL: "http://lokey-virtio:8083"
+  LOKEY_STREAM_ENDPOINT: "/stream"
+  DEVICE_PATH: "/dev/lokeyrng"
+  CHUNK_SIZE: "1024"
+  RECONNECT_INTERVAL: "5s"
+  LOG_LEVEL: "INFO"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example-app
+  namespace: lokey-example
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: example-app
+  template:
+    metadata:
+      labels:
+        app: example-app
+    spec:
+      serviceAccountName: lokey-client
+      # Init container to create the device
+      initContainers:
+      - name: device-init
+        image: ghcr.io/lokey/client-container-init:latest
+        command: ["/app/init"]
+        args:
+          - "-devices"
+          - "/dev/lokeyrng"
+          - "-major"
+          - "10"
+          - "-minor"
+          - "240"
+          - "-perms"
+          - "0666"
+        securityContext:
+          capabilities:
+            add:
+              - MKNOD
+          runAsUser: 0
+          seccompProfile:
+            type: Localhost
+            localhostProfile: lokey-client-init-container.json
+        volumeMounts:
+        - name: dev
+          mountPath: /dev
+      # Sidecar container that feeds the device
+      containers:
+      - name: lokey-client
+        image: ghcr.io/lokey/client-container:latest
+        envFrom:
+        - configMapRef:
+            name: lokey-client-config
+        volumeMounts:
+        - name: dev
+          mountPath: /dev
+        securityContext:
+          seccompProfile:
+            type: Localhost
+            localhostProfile: lokey-client-container.json
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+      # Main application container
+      - name: app
+        image: alpine:latest
+        command:
+          - sh
+          - -c
+          - |
+            while true; do
+              echo "Reading random data:"
+              head -c 32 /dev/lokeyrng | hexdump -C
+              sleep 5
+            done
+        volumeMounts:
+        - name: dev
+          mountPath: /dev
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "50m"
+          limits:
+            memory: "64Mi"
+            cpu: "100m"
+      volumes:
+      - name: dev
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lokey-virtio
+  namespace: lokey-example
+spec:
+  selector:
+    app: lokey-virtio
+  ports:
+  - port: 8083
+    targetPort: 8083

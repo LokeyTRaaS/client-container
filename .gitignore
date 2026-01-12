@@ -1,0 +1,113 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.out
+coverage.html
+
+# Go workspace file
+go.work
+
+# Build directory
+build/
+bin/
+dist/
+
+# Dependency directories
+vendor/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+.project
+.classpath
+.settings/
+*.iml
+
+# Go specific
+*.mod.sum.bak
+
+# Kubernetes/Operator generated files
+# Keep CRD manifests but ignore generated deepcopy if regenerated
+# api/*/zz_generated.deepcopy.go is tracked but can be regenerated
+
+# Operator specific
+config/crd/bases/*.yaml.bak
+config/rbac/role.yaml.bak
+config/manager/manager.yaml.bak
+
+# Test files
+*.test.log
+test-results/
+
+# Docker
+.dockerignore.bak
+docker-compose.override.yml
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# OS files
+Thumbs.db
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Compiled binaries (keep build/ directory structure but ignore binaries)
+# Note: We track the build directory structure but ignore actual binaries
+build/client
+build/init
+build/operator
+
+# Binaries in root directory (from direct builds)
+/client
+/init
+/operator
+
+# Helm
+*.tgz
+.helm/
+
+# Local development
+.local/
+.localenv
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Generated documentation (if any)
+docs/generated/
+
+# kubebuilder generated files (if using kubebuilder)
+PROJECT.bak
+
+# Operator SDK
+.operator-sdk/
+
+# Local test clusters
+.kubeconfig.local

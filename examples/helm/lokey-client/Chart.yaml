@@ -1,0 +1,14 @@
+apiVersion: v2
+name: lokey-client
+description: A Helm chart for Lokey Client Container and Operator
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - lokey
+  - randomness
+  - rng
+  - sidecar
+  - operator
+maintainers:
+  - name: Lokey Team

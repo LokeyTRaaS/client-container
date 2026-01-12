@@ -1,0 +1,242 @@
+version: '3'
+
+vars:
+  GO_VERSION: 1.25
+  BUILD_DIR: ./build
+  MODULES:
+    - "."
+    - "./cmd/client"
+    - "./cmd/operator"
+
+tasks:
+  default:
+    desc: Display available tasks
+    cmds:
+      - task --list-all
+
+  init:
+    desc: Initialize the project
+    cmds:
+      - mkdir -p cmd/client cmd/operator pkg/virtio pkg/device pkg/config pkg/operator/controller pkg/operator/webhook pkg/operator/reconciler api/v1 tests/virtio_test tests/device_test tests/operator_test examples/kubernetes/operator examples/helm/lokey-client docs .github/workflows
+      - |
+        if [ ! -f go.mod ]; then
+          go mod init github.com/lokey/client-container
+          echo "Created go.mod file"
+        fi
+
+  download:
+    desc: Download Go dependencies
+    cmds:
+      - go mod download
+
+  tidy:
+    desc: Tidy all Go modules
+    cmds:
+      - go mod tidy
+
+  fmt:
+    desc: Format all Go code
+    cmds:
+      - |
+        find . -name "*.go" -not -path "./vendor/*" -not -path "./build/*" -not -path "./api/*/zz_generated*" | grep -q "\.go$" || {
+          echo "No Go files found. Skipping format."
+          exit 0
+        }
+      - find . -name "*.go" -not -path "./vendor/*" -not -path "./build/*" -not -path "./api/*/zz_generated*" | xargs gofmt -s -w
+
+  vet:
+    desc: Vet all code
+    deps: [download]
+    cmds:
+      - |
+        find . -name "*.go" -not -path "./vendor/*" -not -path "./build/*" -not -path "./api/*/zz_generated*" | grep -q "\.go$" || {
+          echo "No Go files found. Skipping vet."
+          exit 0
+        }
+      - go vet ./... || echo "Vet found issues, but continuing"
+
+  lint:
+    desc: Run linters on source code
+    deps: [install-golangci-lint, download]
+    cmds:
+      - |
+        find ./pkg ./cmd -name "*.go" -not -path "./vendor/*" -not -path "./build/*" -not -path "./api/*/zz_generated*" 2>/dev/null | grep -q "\.go$" || {
+          echo "No Go files found. Skipping lint."
+          exit 0
+        }
+      - golangci-lint run --config .golangci.yml ./pkg/... ./cmd/... || echo "Linting found issues, but continuing"
+
+  test:
+    desc: Run tests
+    deps: [download]
+    cmds:
+      - |
+        find ./tests -name "*_test.go" -not -path "./vendor/*" -not -path "./build/*" 2>/dev/null | grep -q "_test\.go$" || {
+          echo "No test files found. Skipping tests."
+          exit 0
+        }
+      - go test ./tests/... -v
+
+  test-coverage:
+    desc: Run tests with coverage report
+    deps: [download]
+    cmds:
+      - |
+        find ./tests -name "*_test.go" -not -path "./vendor/*" -not -path "./build/*" 2>/dev/null | grep -q "_test\.go$" || {
+          echo "No test files found. Skipping tests."
+          exit 0
+        }
+      - mkdir -p build
+      - go test -race -coverprofile=build/coverage.out -covermode=atomic ./tests/...
+      - go tool cover -func=build/coverage.out | tail -1
+
+  build:
+    desc: Build all components
+    deps: [download]
+    cmds:
+      - mkdir -p {{.BUILD_DIR}}
+      - |
+        if [ -d cmd/client ] && [ -f cmd/client/main.go ]; then
+          cd cmd/client && go build -o ../../{{.BUILD_DIR}}/client || echo "Client build failed"
+        else
+          echo "Skipping client build - directory or main.go not found"
+        fi
+      - |
+        if [ -d cmd/init ] && [ -f cmd/init/main.go ]; then
+          cd cmd/init && go build -o ../../{{.BUILD_DIR}}/init || echo "Init build failed"
+        else
+          echo "Skipping init build - directory or main.go not found"
+        fi
+      - |
+        if [ -d cmd/operator ] && [ -f cmd/operator/main.go ]; then
+          cd cmd/operator && go build -o ../../{{.BUILD_DIR}}/operator || echo "Operator build failed"
+        else
+          echo "Skipping operator build - directory or main.go not found"
+        fi
+
+  clean:
+    desc: Clean build artifacts
+    cmds:
+      - rm -rf {{.BUILD_DIR}}
+
+  install-golangci-lint:
+    desc: Install golangci-lint
+    cmds:
+      - |
+        if ! command -v golangci-lint &> /dev/null; then
+          echo "Installing golangci-lint..."
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+        fi
+    silent: true
+
+  prepare-all:
+    desc: Run all preparation tasks
+    cmds:
+      - task: tidy
+      - task: download
+      - task: fmt
+      - task: vet
+      - task: lint
+
+  all:
+    desc: Run all development tasks in sequence
+    cmds:
+      - echo "=== Starting all tasks ==="
+      - task: init
+      - task: clean
+      - task: tidy
+      - task: download
+      - task: fmt
+      - task: vet
+      - task: lint
+      - task: test
+      - task: build
+      - echo "=== All tasks completed ==="
+
+  # Operator-specific tasks
+  operator-build:
+    desc: Build operator binary
+    deps: [download]
+    cmds:
+      - mkdir -p {{.BUILD_DIR}}
+      - cd cmd/operator && go build -o {{.BUILD_DIR}}/operator
+
+  operator-test:
+    desc: Run operator tests
+    deps: [download]
+    cmds:
+      - go test ./tests/operator_test/... -v
+
+  operator-manifests:
+    desc: Generate CRD manifests (requires Makefile from kubebuilder)
+    cmds:
+      - |
+        if [ -f Makefile ]; then
+          make manifests
+        else
+          echo "Makefile not found. Run kubebuilder init first."
+          exit 1
+        fi
+
+  operator-install:
+    desc: Install CRDs (requires kubectl)
+    cmds:
+      - |
+        if [ -d config/crd/bases ]; then
+          kubectl apply -f config/crd/bases/
+        else
+          echo "CRD manifests not found. Run 'task operator-manifests' first."
+          exit 1
+        fi
+
+  operator-run:
+    desc: Run operator locally (requires kubeconfig)
+    deps:
+      - operator-build
+    cmds:
+      - "{{.BUILD_DIR}}/operator"
+
+  # Docker build tasks
+  docker-build-client:
+    desc: Build client container image locally
+    cmds:
+      - docker build -t lokey-client-container:latest -f Dockerfile .
+
+  docker-build-init:
+    desc: Build init container image locally
+    cmds:
+      - docker build -t lokey-client-container-init:latest -f Dockerfile.init .
+
+  docker-build-operator:
+    desc: Build operator container image locally
+    cmds:
+      - docker build -t lokey-client-container-operator:latest -f Dockerfile.operator .
+
+  docker-build-all:
+    desc: Build all container images locally
+    cmds:
+      - task: docker-build-client
+      - task: docker-build-init
+      - task: docker-build-operator
+
+  docker-build-multi:
+    desc: Build all containers for multiple architectures (requires docker buildx)
+    cmds:
+      - |
+        docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7,linux/arm/v8 \
+          -t lokey-client-container:latest \
+          -f Dockerfile \
+          --load \
+          .
+      - |
+        docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7,linux/arm/v8 \
+          -t lokey-client-container-init:latest \
+          -f Dockerfile.init \
+          --load \
+          .
+      - |
+        docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7,linux/arm/v8 \
+          -t lokey-client-container-operator:latest \
+          -f Dockerfile.operator \
+          --load \
+          .

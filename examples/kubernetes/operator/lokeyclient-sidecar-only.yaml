@@ -1,0 +1,14 @@
+apiVersion: lokey.io/v1
+kind: LokeyClient
+metadata:
+  name: lokey-client-sidecar-only
+spec:
+  virtioUrl: "http://lokey-virtio.lokey-system.svc.cluster.local:8083"
+  # Enable only sidecar injection
+  enableSidecar: true
+  enableDaemonset: false
+  devicePaths:
+    - "/dev/lokeyrng"
+  podSelector:
+    matchLabels:
+      lokey.io/inject: "true"

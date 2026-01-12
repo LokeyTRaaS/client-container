@@ -1,0 +1,95 @@
+run:
+  timeout: 5m
+  tests: false
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - typecheck
+    - unused
+    - gosec
+    - gofmt
+    - goimports
+  disable:
+    - revive
+    - dupl
+    - goconst
+    - gocritic
+    - gocyclo
+    - err113
+    - lll
+    - noctx
+    - nolintlint
+    - rowserrcheck
+    - stylecheck
+    - tagliatelle
+    - thelper
+    - unconvert
+    - unparam
+    - whitespace
+    - wrapcheck
+    - wsl
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+    exclude-functions:
+      - (io.Writer).Write
+      - (*encoding/json.Encoder).Encode
+      - os.RemoveAll
+      - os.Setenv
+      - os.Unsetenv
+
+  gofmt:
+    simplify: true
+
+  goimports:
+    local-prefixes: github.com/lokey/client-container
+
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment
+      - shadow
+
+  gosec:
+    severity: medium
+    confidence: medium
+    excludes:
+      - G104
+      - G107
+      - G204
+
+issues:
+  exclude-dirs:
+    - tests
+  exclude-files:
+    - ".*\\.pb\\.go$"
+    - ".*zz_generated\\.go$"
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosec
+        - govet
+        - ineffassign
+      text: "Error return value of .* is not checked"
+    - path: _test\.go
+      linters:
+        - gosec
+      text: "G104: Errors unhandled"
+    - path: _test\.go
+      linters:
+        - gosec
+      text: "G107: Potential HTTP request made with variable url"
+    - path: _test\.go
+      linters:
+        - govet
+      text: "buildtag:"
+  max-issues-per-linter: 0
+  max-same-issues: 0

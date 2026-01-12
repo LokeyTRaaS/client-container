@@ -1,0 +1,30 @@
+apiVersion: lokey.io/v1
+kind: LokeyClient
+metadata:
+  name: lokey-client-default
+spec:
+  virtioUrl: "http://lokey-virtio.lokey-system.svc.cluster.local:8083"
+  # Enable sidecar injection
+  enableSidecar: true
+  # Enable daemonset for node-level randomness
+  enableDaemonset: true
+  devicePaths:
+    - "/dev/lokeyrng"
+    - "/dev/hwrng"
+  chunkSize: 1024
+  reconnectInterval: "5s"
+  injectionMode: "annotation"
+  podSelector:
+    matchLabels:
+      lokey.io/inject: "true"
+  resources:
+    requests:
+      memory: "32Mi"
+      cpu: "50m"
+    limits:
+      memory: "128Mi"
+      cpu: "200m"
+  image: "ghcr.io/lokey/client-container:latest"
+  initImage: "ghcr.io/lokey/client-container-init:latest"
+  # enableSeccomp: false  # Optional: enable seccomp profiles (default: false)
+  # Requires seccomp profiles to be installed on nodes

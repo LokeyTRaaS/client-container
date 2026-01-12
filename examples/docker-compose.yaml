@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  # Lokey VirtIO service (assumes it's running elsewhere or add it here)
+  # This example assumes VirtIO is accessible at virtio:8083
+
+  # Client container that feeds random data to devices
+  lokey-client:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: lokey-client
+    environment:
+      - LOKEY_VIRTIO_URL=http://virtio:8083
+      - LOKEY_STREAM_ENDPOINT=/stream
+      - DEVICE_PATH=/dev/lokeyrng
+      - CHUNK_SIZE=1024
+      - RECONNECT_INTERVAL=5s
+      - LOG_LEVEL=INFO
+    volumes:
+      - /dev:/dev
+    devices:
+      - /dev/lokeyrng:/dev/lokeyrng
+    depends_on:
+      - virtio
+    restart: unless-stopped
+    networks:
+      - lokey-network
+
+  # Example VirtIO service (if not running separately)
+  virtio:
+    image: ghcr.io/lokeytraas/lokey/virtio:latest
+    container_name: lokey-virtio
+    ports:
+      - "8083:8083"
+    environment:
+      - PORT=8083
+      - VIRTIO_QUEUE_SIZE=15000
+      - VIRTIO_PIPE_PATH=/var/run/lokey/virtio-rng
+      - LOG_LEVEL=INFO
+    volumes:
+      - /var/run/lokey:/var/run/lokey
+    networks:
+      - lokey-network
+
+  # Example application that uses the random device
+  example-app:
+    image: alpine:latest
+    container_name: example-app
+    command: sh -c "while true; do head -c 32 /dev/lokeyrng | hexdump -C; sleep 5; done"
+    volumes:
+      - /dev:/dev
+    devices:
+      - /dev/lokeyrng:/dev/lokeyrng
+    depends_on:
+      - lokey-client
+    networks:
+      - lokey-network
+
+networks:
+  lokey-network:
+    driver: bridge
