@@ -126,7 +126,11 @@ func (w *Writer) reopenDevice(index int) error {
 
 	// Close existing device if open
 	if index < len(w.devices) && w.devices[index] != nil {
-		_ = w.devices[index].Close()
+		if err := w.devices[index].Close(); err != nil {
+			if w.logLevel == "DEBUG" || w.logLevel == "INFO" {
+				log.Printf("[WARN] Error closing device %s before reopen: %v", w.devicePaths[index], err)
+			}
+		}
 		w.devices[index] = nil
 	}
 
