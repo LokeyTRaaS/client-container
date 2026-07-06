@@ -35,13 +35,14 @@ func NewClient(baseURL, streamEndpoint string, chunkSize int, reconnectInterval 
 
 // StreamReader provides a reader interface for the VirtIO stream
 type StreamReader struct {
-	client *Client
-	ctx    context.Context
-	cancel context.CancelFunc
-	dataCh chan []byte
-	errCh  chan error
-	closed bool
-	mu     chan struct{} // Simple mutex using channel
+	client  *Client
+	ctx     context.Context
+	cancel  context.CancelFunc
+	dataCh  chan []byte
+	errCh   chan error
+	pending []byte // Remainder of a chunk that didn't fit into the caller's buffer
+	closed  bool
+	mu      chan struct{} // Simple mutex using channel
 }
 
 // NewStreamReader creates a new stream reader
@@ -63,6 +64,13 @@ func (c *Client) NewStreamReader(ctx context.Context) *StreamReader {
 
 // Read reads data from the stream
 func (sr *StreamReader) Read(p []byte) (n int, err error) {
+	// Serve buffered remainder from a previous read first
+	if len(sr.pending) > 0 {
+		n = copy(p, sr.pending)
+		sr.pending = sr.pending[n:]
+		return n, nil
+	}
+
 	select {
 	case <-sr.ctx.Done():
 		return 0, sr.ctx.Err()
@@ -71,9 +79,8 @@ func (sr *StreamReader) Read(p []byte) (n int, err error) {
 	case data := <-sr.dataCh:
 		n = copy(p, data)
 		if n < len(data) {
-			// Buffer remaining data for next read
-			// For simplicity, we'll just return what we can
-			// In a production system, you might want to buffer the remainder
+			// Buffer the remainder for the next read
+			sr.pending = data[n:]
 		}
 		return n, nil
 	}
@@ -88,9 +95,9 @@ func (sr *StreamReader) Close() error {
 		return nil
 	}
 	sr.closed = true
+	// Only cancel the context; closing the channels here would race with
+	// readLoop, which may still be sending on them
 	sr.cancel()
-	close(sr.dataCh)
-	close(sr.errCh)
 	return nil
 }
 
@@ -220,12 +227,4 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-// min returns the minimum of two durations
-func min(a, b time.Duration) time.Duration {
-	if a < b {
-		return a
-	}
-	return b
 }
