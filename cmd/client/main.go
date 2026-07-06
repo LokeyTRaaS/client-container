@@ -61,7 +61,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("[ERROR] Failed to create device writer: %v", err)
 	}
-	defer deviceWriter.Close()
+	defer func() {
+		if err := deviceWriter.Close(); err != nil {
+			log.Printf("[WARN] Error closing device writer: %v", err)
+		}
+	}()
 
 	// Set up signal handling for graceful shutdown
 	sigCh := make(chan os.Signal, 1)
@@ -73,7 +77,11 @@ func main() {
 
 	// Start streaming
 	streamReader := virtioClient.NewStreamReader(mainCtx)
-	defer streamReader.Close()
+	defer func() {
+		if err := streamReader.Close(); err != nil {
+			log.Printf("[WARN] Error closing stream reader: %v", err)
+		}
+	}()
 
 	if cfg.LogLevel == "DEBUG" || cfg.LogLevel == "INFO" {
 		log.Printf("[INFO] Started streaming from VirtIO service")

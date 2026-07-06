@@ -61,7 +61,9 @@ func createDevice(path string, major, minor int, mode os.FileMode) error {
 	// Create directory if it doesn't exist
 	dir := path[:strings.LastIndex(path, "/")]
 	if dir != "" {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		// Device directory must stay world-traversable so non-root
+		// containers can reach the device node
+		if err := os.MkdirAll(dir, 0755); err != nil { // #nosec G301
 			return fmt.Errorf("failed to create directory: %w", err)
 		}
 	}

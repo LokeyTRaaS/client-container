@@ -44,7 +44,8 @@ func (w *Writer) Open() error {
 	w.closeDevices()
 
 	for _, path := range w.devicePaths {
-		file, err := os.OpenFile(path, os.O_WRONLY, 0)
+		// Device paths come from validated operator/deployment configuration
+		file, err := os.OpenFile(path, os.O_WRONLY, 0) // #nosec G304
 		if err != nil {
 			// Log error but continue with other devices
 			if w.logLevel == "DEBUG" || w.logLevel == "INFO" {
@@ -125,7 +126,7 @@ func (w *Writer) reopenDevice(index int) error {
 
 	// Close existing device if open
 	if index < len(w.devices) && w.devices[index] != nil {
-		w.devices[index].Close()
+		_ = w.devices[index].Close()
 		w.devices[index] = nil
 	}
 
