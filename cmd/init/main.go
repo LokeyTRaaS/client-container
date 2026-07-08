@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -34,6 +35,9 @@ func main() {
 		if path == "" {
 			continue
 		}
+		if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+			log.Fatalf("[ERROR] Invalid device path %q: must be an absolute, clean path", path)
+		}
 
 		// Determine major/minor based on device path
 		maj, min := *major, *minor
@@ -59,8 +63,7 @@ func main() {
 
 func createDevice(path string, major, minor int, mode os.FileMode) error {
 	// Create directory if it doesn't exist
-	dir := path[:strings.LastIndex(path, "/")]
-	if dir != "" {
+	if dir := filepath.Dir(path); dir != "/" && dir != "." {
 		// Device directory must stay world-traversable so non-root
 		// containers can reach the device node
 		if err := os.MkdirAll(dir, 0755); err != nil { // #nosec G301

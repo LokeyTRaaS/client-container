@@ -98,6 +98,21 @@ func TestLoadConfig_InvalidValues(t *testing.T) {
 			env:    map[string]string{"LOG_LEVEL": "INVALID"},
 			errMsg: "invalid LOG_LEVEL",
 		},
+		{
+			name:   "relative device path",
+			env:    map[string]string{"DEVICE_PATH": "dev/lokeyrng"},
+			errMsg: "invalid device path",
+		},
+		{
+			name:   "malformed virtio URL",
+			env:    map[string]string{"LOKEY_VIRTIO_URL": "http://bad host:8083"},
+			errMsg: "invalid virtio URL",
+		},
+		{
+			name:   "virtio URL without scheme",
+			env:    map[string]string{"LOKEY_VIRTIO_URL": "localhost:8083"},
+			errMsg: "invalid virtio URL",
+		},
 	}
 
 	for _, tc := range testCases {

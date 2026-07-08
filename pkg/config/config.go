@@ -2,7 +2,9 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -95,6 +97,10 @@ func LoadConfig() (*Config, error) {
 	}
 	cfg.LogLevel = strings.ToUpper(cfg.LogLevel)
 
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
 }
 
@@ -111,8 +117,18 @@ func (c *Config) Validate() error {
 	if c.VirtIOURL == "" {
 		return fmt.Errorf("virtio URL cannot be empty")
 	}
+	if u, err := url.ParseRequestURI(c.VirtIOURL); err != nil {
+		return fmt.Errorf("invalid virtio URL %q: %w", c.VirtIOURL, err)
+	} else if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("invalid virtio URL %q: scheme must be http or https", c.VirtIOURL)
+	}
 	if len(c.DevicePaths) == 0 {
 		return fmt.Errorf("at least one device path must be specified")
+	}
+	for _, path := range c.DevicePaths {
+		if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+			return fmt.Errorf("invalid device path %q: must be an absolute, clean path", path)
+		}
 	}
 	if c.ChunkSize < 1 {
 		return fmt.Errorf("chunk size must be positive")
