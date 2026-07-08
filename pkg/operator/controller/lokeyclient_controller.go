@@ -27,6 +27,7 @@ type LokeyClientReconciler struct {
 //+kubebuilder:rbac:groups=lokey.io,resources=lokeyclients/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=lokey.io,resources=lokeyclients/finalizers,verbs=update
 //+kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;patch
+//+kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;list;watch
 //+kubebuilder:rbac:groups=apps,resources=daemonsets,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop
@@ -60,11 +61,14 @@ func (r *LokeyClientReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 					continue
 				}
 
-				// Get namespace labels
+				// Get namespace labels; on failure nsLabels stays nil and
+				// namespace selectors will not match (fail closed)
 				var nsLabels map[string]string
 				ns := &corev1.Namespace{}
 				if err := r.Get(ctx, client.ObjectKey{Name: pod.Namespace}, ns); err == nil {
 					nsLabels = ns.Labels
+				} else {
+					logger.Error(err, "failed to get namespace labels", "namespace", pod.Namespace)
 				}
 
 				// Check if pod should be injected

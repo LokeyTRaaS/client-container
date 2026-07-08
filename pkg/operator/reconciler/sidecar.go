@@ -9,27 +9,29 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 )
 
-// ShouldInjectSidecar determines if a pod should have the sidecar injected
+// ShouldInjectSidecar determines if a pod should have the sidecar injected.
+// Selectors fail closed: an unparsable selector, or missing namespace labels,
+// never widens the match.
 func ShouldInjectSidecar(pod *corev1.Pod, namespaceLabels map[string]string, namespaceSelector, podSelector *metav1.LabelSelector) bool {
 	// Check namespace labels
 	if namespaceSelector != nil {
 		nsSelector, err := metav1.LabelSelectorAsSelector(namespaceSelector)
-		if err == nil && namespaceLabels != nil {
-			nsLabels := labels.Set(namespaceLabels)
-			if !nsSelector.Matches(nsLabels) {
-				return false
-			}
+		if err != nil {
+			return false
+		}
+		if !nsSelector.Matches(labels.Set(namespaceLabels)) {
+			return false
 		}
 	}
 
 	// Check pod labels
 	if podSelector != nil {
 		podSel, err := metav1.LabelSelectorAsSelector(podSelector)
-		if err == nil {
-			podLabels := labels.Set(pod.Labels)
-			if !podSel.Matches(podLabels) {
-				return false
-			}
+		if err != nil {
+			return false
+		}
+		if !podSel.Matches(labels.Set(pod.Labels)) {
+			return false
 		}
 	}
 

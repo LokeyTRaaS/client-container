@@ -13,7 +13,7 @@ var (
 	GroupVersion = schema.GroupVersion{Group: "lokey.io", Version: "v1"}
 
 	// SchemeBuilder is used to add go types to the GroupVersionKind scheme
-	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion} //nolint:staticcheck // standard kubebuilder scaffolding
+	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion} //nolint:staticcheck // deprecated upstream; migration deferred until the operator refactor (docs/redesign-proposal.md)
 
 	// AddToScheme adds the types in this group-version to the given scheme.
 	AddToScheme = SchemeBuilder.AddToScheme
