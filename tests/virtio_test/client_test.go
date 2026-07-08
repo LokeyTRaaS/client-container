@@ -89,3 +89,41 @@ func TestStreamReader_Read(t *testing.T) {
 		t.Fatalf("Unexpected data: got %q, expected %q", data, "test data 12345")
 	}
 }
+
+func TestStreamReader_SmallBufferReads(t *testing.T) {
+	payload := []byte("0123456789abcdefghijklmnopqrstuv")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/stream" {
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.WriteHeader(http.StatusOK)
+			w.Write(payload)
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := virtio.NewClient(server.URL, "/stream", 1024, 5*time.Second, "INFO")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	reader := client.NewStreamReader(ctx)
+	defer reader.Close()
+
+	// Read with a buffer smaller than the streamed chunk; the remainder must
+	// be preserved across reads and delivered in order
+	got := make([]byte, 0, len(payload))
+	buf := make([]byte, 7)
+	for len(got) < len(payload) {
+		n, err := reader.Read(buf)
+		if err != nil {
+			t.Fatalf("Read failed after %d bytes: %v", len(got), err)
+		}
+		got = append(got, buf[:n]...)
+	}
+
+	if string(got) != string(payload) {
+		t.Fatalf("Data mismatch: got %q, expected %q", got, payload)
+	}
+}

@@ -15,8 +15,6 @@ linters:
       check-blank: true
       exclude-functions:
         - (io.Writer).Write
-        - (io.Closer).Close
-        - (io.ReadCloser).Close
         - (*encoding/json.Encoder).Encode
         - os.RemoveAll
         - os.Setenv
@@ -37,17 +35,11 @@ linters:
         - G204
 
   exclusions:
-    rules:
-      - path: _test\.go
-        linters:
-          - errcheck
-          - gosec
-          - govet
-          - ineffassign
+    # No _test.go rules here: `run.tests: false` already skips test files entirely
     paths:
       - tests
       - ".*\\.pb\\.go$"
-      - ".*zz_generated\\.go$"
+      - ".*zz_generated\\..*\\.go$"
 
 formatters:
   enable:

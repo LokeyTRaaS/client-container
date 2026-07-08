@@ -33,13 +33,15 @@ func NewClient(baseURL, streamEndpoint string, chunkSize int, reconnectInterval 
 	}
 }
 
-// StreamReader provides a reader interface for the VirtIO stream
+// StreamReader provides a reader interface for the VirtIO stream.
+// It is not safe for concurrent use: Read must only be called from one
+// goroutine at a time (the usual io.Reader convention). Close may be
+// called concurrently with Read.
 type StreamReader struct {
 	client  *Client
 	ctx     context.Context
 	cancel  context.CancelFunc
 	dataCh  chan []byte
-	errCh   chan error
 	pending []byte // Remainder of a chunk that didn't fit into the caller's buffer
 	closed  bool
 	mu      chan struct{} // Simple mutex using channel
@@ -53,7 +55,6 @@ func (c *Client) NewStreamReader(ctx context.Context) *StreamReader {
 		ctx:    streamCtx,
 		cancel: cancel,
 		dataCh: make(chan []byte, 10),
-		errCh:  make(chan error, 1),
 		mu:     make(chan struct{}, 1),
 	}
 	sr.mu <- struct{}{} // Initialize mutex
@@ -62,7 +63,9 @@ func (c *Client) NewStreamReader(ctx context.Context) *StreamReader {
 	return sr
 }
 
-// Read reads data from the stream
+// Read reads data from the stream. After Close (or cancellation of the
+// parent context) it returns the context error, though already-buffered
+// chunks may still be delivered first.
 func (sr *StreamReader) Read(p []byte) (n int, err error) {
 	// Serve buffered remainder from a previous read first
 	if len(sr.pending) > 0 {
@@ -74,14 +77,10 @@ func (sr *StreamReader) Read(p []byte) (n int, err error) {
 	select {
 	case <-sr.ctx.Done():
 		return 0, sr.ctx.Err()
-	case err := <-sr.errCh:
-		return 0, err
 	case data := <-sr.dataCh:
 		n = copy(p, data)
-		if n < len(data) {
-			// Buffer the remainder for the next read
-			sr.pending = data[n:]
-		}
+		// Buffer any remainder for the next read
+		sr.pending = data[n:]
 		return n, nil
 	}
 }
@@ -123,8 +122,14 @@ func (sr *StreamReader) readLoop() {
 		// Create request with context
 		req, err := http.NewRequestWithContext(sr.ctx, "GET", streamURL, nil)
 		if err != nil {
-			sr.sendError(fmt.Errorf("failed to create request: %w", err))
-			return
+			// Request construction only fails for malformed configuration
+			// (e.g. a bad URL). Log loudly and keep retrying like every other
+			// error path, so a consumer blocked in Read is never stranded
+			// without a producer.
+			log.Printf("[ERROR] Failed to create stream request: %v, retrying in %v", err, backoff)
+			sleepCtx(sr.ctx, backoff)
+			backoff = min(backoff*2, maxBackoff)
+			continue
 		}
 
 		// Make request
@@ -133,18 +138,18 @@ func (sr *StreamReader) readLoop() {
 			if sr.client.logLevel == "DEBUG" || sr.client.logLevel == "INFO" {
 				log.Printf("[WARN] Failed to connect to VirtIO service: %v, retrying in %v", err, backoff)
 			}
-			time.Sleep(backoff)
+			sleepCtx(sr.ctx, backoff)
 			backoff = min(backoff*2, maxBackoff)
 			continue
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			resp.Body.Close()
+			sr.client.closeBody(resp.Body)
 			err := fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 			if sr.client.logLevel == "DEBUG" || sr.client.logLevel == "INFO" {
 				log.Printf("[WARN] %v, retrying in %v", err, backoff)
 			}
-			time.Sleep(backoff)
+			sleepCtx(sr.ctx, backoff)
 			backoff = min(backoff*2, maxBackoff)
 			continue
 		}
@@ -161,7 +166,7 @@ func (sr *StreamReader) readLoop() {
 		for {
 			select {
 			case <-sr.ctx.Done():
-				resp.Body.Close()
+				sr.client.closeBody(resp.Body)
 				return
 			default:
 			}
@@ -173,7 +178,7 @@ func (sr *StreamReader) readLoop() {
 				select {
 				case sr.dataCh <- data:
 				case <-sr.ctx.Done():
-					resp.Body.Close()
+					sr.client.closeBody(resp.Body)
 					return
 				}
 			}
@@ -181,30 +186,42 @@ func (sr *StreamReader) readLoop() {
 			if err != nil {
 				if err == io.EOF {
 					// Stream ended, reconnect
-					resp.Body.Close()
+					sr.client.closeBody(resp.Body)
 					if sr.client.logLevel == "DEBUG" || sr.client.logLevel == "INFO" {
 						log.Printf("[INFO] Stream ended, reconnecting...")
 					}
-					time.Sleep(sr.client.reconnectInterval)
+					sleepCtx(sr.ctx, sr.client.reconnectInterval)
 					break
 				}
 				// Other error, reconnect
-				resp.Body.Close()
+				sr.client.closeBody(resp.Body)
 				if sr.client.logLevel == "DEBUG" || sr.client.logLevel == "INFO" {
 					log.Printf("[WARN] Stream read error: %v, reconnecting...", err)
 				}
-				time.Sleep(sr.client.reconnectInterval)
+				sleepCtx(sr.ctx, sr.client.reconnectInterval)
 				break
 			}
 		}
 	}
 }
 
-// sendError sends an error to the error channel
-func (sr *StreamReader) sendError(err error) {
+// closeBody closes an HTTP response body, logging any close error
+func (c *Client) closeBody(body io.Closer) {
+	if err := body.Close(); err != nil {
+		if c.logLevel == "DEBUG" || c.logLevel == "INFO" {
+			log.Printf("[WARN] Error closing response body: %v", err)
+		}
+	}
+}
+
+// sleepCtx waits for the given duration or until ctx is cancelled,
+// whichever comes first
+func sleepCtx(ctx context.Context, d time.Duration) {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
 	select {
-	case sr.errCh <- err:
-	case <-sr.ctx.Done():
+	case <-timer.C:
+	case <-ctx.Done():
 	}
 }
 
@@ -220,7 +237,7 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("health check failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer c.closeBody(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("health check returned non-200 status: %d", resp.StatusCode)
