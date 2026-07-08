@@ -87,3 +87,72 @@ func TestWriter_InvalidPath(t *testing.T) {
 		t.Fatal("Expected error for invalid device path")
 	}
 }
+
+func TestWriter_RelativePathRejected(t *testing.T) {
+	_, err := device.NewWriter([]string{"dev/lokeyrng"}, "INFO")
+	if err == nil {
+		t.Fatal("Expected error for relative device path")
+	}
+}
+
+func TestWriter_DeviceRecovery(t *testing.T) {
+	tmpDir := t.TempDir()
+	latePath := filepath.Join(tmpDir, "late-device")
+	readyPath := filepath.Join(tmpDir, "ready-device")
+
+	file, err := os.Create(readyPath)
+	if err != nil {
+		t.Fatalf("Failed to create test device: %v", err)
+	}
+	file.Close()
+
+	// One of two devices can't be opened yet: the writer must keep serving
+	// the available one and keep the path/device mapping aligned
+	writer, err := device.NewWriter([]string{latePath, readyPath}, "INFO")
+	if err != nil {
+		t.Fatalf("Failed to create writer: %v", err)
+	}
+	defer writer.Close()
+
+	first := []byte("first")
+	if err := writer.Write(first); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	readyData, err := os.ReadFile(readyPath)
+	if err != nil {
+		t.Fatalf("Failed to read device: %v", err)
+	}
+	if string(readyData) != string(first) {
+		t.Fatalf("Ready device data mismatch: got %q, expected %q", readyData, first)
+	}
+
+	// The missing device appears later (e.g. created by the init container):
+	// the next write must pick it up instead of dropping it forever
+	file, err = os.Create(latePath)
+	if err != nil {
+		t.Fatalf("Failed to create late device: %v", err)
+	}
+	file.Close()
+
+	second := []byte("second")
+	if err := writer.Write(second); err != nil {
+		t.Fatalf("Write after device appeared failed: %v", err)
+	}
+
+	lateData, err := os.ReadFile(latePath)
+	if err != nil {
+		t.Fatalf("Failed to read late device: %v", err)
+	}
+	if string(lateData) != string(second) {
+		t.Fatalf("Late device data mismatch: got %q, expected %q", lateData, second)
+	}
+
+	readyData, err = os.ReadFile(readyPath)
+	if err != nil {
+		t.Fatalf("Failed to read device: %v", err)
+	}
+	if string(readyData) != string(first)+string(second) {
+		t.Fatalf("Ready device data mismatch: got %q, expected %q", readyData, string(first)+string(second))
+	}
+}

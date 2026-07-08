@@ -1,9 +1,11 @@
 package device
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
 )
 
@@ -20,10 +22,14 @@ func NewWriter(devicePaths []string, logLevel string) (*Writer, error) {
 	if len(devicePaths) == 0 {
 		return nil, fmt.Errorf("no device paths provided")
 	}
+	for _, path := range devicePaths {
+		if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+			return nil, fmt.Errorf("invalid device path %q: must be an absolute, clean path", path)
+		}
+	}
 
 	w := &Writer{
 		devicePaths: devicePaths,
-		devices:     make([]*os.File, 0, len(devicePaths)),
 		logLevel:    logLevel,
 	}
 
@@ -41,10 +47,18 @@ func (w *Writer) Open() error {
 	defer w.mu.Unlock()
 
 	// Close existing devices if any
-	w.closeDevices()
+	if err := w.closeDevices(); err != nil {
+		if w.logLevel == "DEBUG" || w.logLevel == "INFO" {
+			log.Printf("[WARN] Error closing devices before reopen: %v", err)
+		}
+	}
 
-	for _, path := range w.devicePaths {
-		// Device paths come from validated operator/deployment configuration
+	// Keep w.devices index-aligned with w.devicePaths: entries stay nil for
+	// paths that fail to open so they can be retried on later writes
+	w.devices = make([]*os.File, len(w.devicePaths))
+	opened := 0
+	for i, path := range w.devicePaths {
+		// Paths are validated in NewWriter (absolute, clean)
 		file, err := os.OpenFile(path, os.O_WRONLY, 0) // #nosec G304
 		if err != nil {
 			// Log error but continue with other devices
@@ -54,13 +68,14 @@ func (w *Writer) Open() error {
 			continue
 		}
 
-		w.devices = append(w.devices, file)
+		w.devices[i] = file
+		opened++
 		if w.logLevel == "DEBUG" || w.logLevel == "INFO" {
 			log.Printf("[INFO] Opened device: %s", path)
 		}
 	}
 
-	if len(w.devices) == 0 {
+	if opened == 0 {
 		return fmt.Errorf("failed to open any devices")
 	}
 
@@ -80,6 +95,15 @@ func (w *Writer) Write(data []byte) error {
 	successCount := 0
 
 	for i, device := range w.devices {
+		if device == nil {
+			// Device failed to open earlier; try to bring it back
+			if reopenErr := w.reopenDevice(i); reopenErr != nil {
+				lastErr = fmt.Errorf("device %s unavailable: %w", w.devicePaths[i], reopenErr)
+				continue
+			}
+			device = w.devices[i]
+		}
+
 		n, err := device.Write(data)
 		if err != nil {
 			lastErr = fmt.Errorf("failed to write to device %s: %w", w.devicePaths[i], err)
@@ -96,10 +120,14 @@ func (w *Writer) Write(data []byte) error {
 		}
 
 		if n != len(data) {
+			// A short write means the device received a truncated chunk;
+			// count it as a failure so the caller doesn't treat these bytes
+			// as delivered
 			lastErr = fmt.Errorf("partial write to device %s: wrote %d of %d bytes", w.devicePaths[i], n, len(data))
 			if w.logLevel == "DEBUG" || w.logLevel == "INFO" {
 				log.Printf("[WARN] %v", lastErr)
 			}
+			continue
 		}
 
 		successCount++
@@ -118,14 +146,15 @@ func (w *Writer) Write(data []byte) error {
 	return fmt.Errorf("no devices available for writing")
 }
 
-// reopenDevice attempts to reopen a device at the given index
+// reopenDevice attempts to reopen the device at the given index.
+// The caller must hold w.mu.
 func (w *Writer) reopenDevice(index int) error {
-	if index < 0 || index >= len(w.devicePaths) {
+	if index < 0 || index >= len(w.devices) {
 		return fmt.Errorf("invalid device index: %d", index)
 	}
 
 	// Close existing device if open
-	if index < len(w.devices) && w.devices[index] != nil {
+	if w.devices[index] != nil {
 		if err := w.devices[index].Close(); err != nil {
 			if w.logLevel == "DEBUG" || w.logLevel == "INFO" {
 				log.Printf("[WARN] Error closing device %s before reopen: %v", w.devicePaths[index], err)
@@ -134,38 +163,29 @@ func (w *Writer) reopenDevice(index int) error {
 		w.devices[index] = nil
 	}
 
-	// Try to reopen
-	file, err := os.OpenFile(w.devicePaths[index], os.O_WRONLY, 0)
+	// Try to reopen; paths are validated in NewWriter (absolute, clean)
+	file, err := os.OpenFile(w.devicePaths[index], os.O_WRONLY, 0) // #nosec G304
 	if err != nil {
 		return err
 	}
 
-	// Update device in slice
-	if index < len(w.devices) {
-		w.devices[index] = file
-	} else {
-		// Extend slice if needed
-		for len(w.devices) <= index {
-			w.devices = append(w.devices, nil)
-		}
-		w.devices[index] = file
-	}
-
+	w.devices[index] = file
 	return nil
 }
 
-// closeDevices closes all open devices
-func (w *Writer) closeDevices() {
+// closeDevices closes all open devices and returns the combined close
+// errors. The caller must hold w.mu.
+func (w *Writer) closeDevices() error {
+	var errs []error
 	for i, device := range w.devices {
 		if device != nil {
 			if err := device.Close(); err != nil {
-				if w.logLevel == "DEBUG" || w.logLevel == "INFO" {
-					log.Printf("[WARN] Error closing device %s: %v", w.devicePaths[i], err)
-				}
+				errs = append(errs, fmt.Errorf("close %s: %w", w.devicePaths[i], err))
 			}
 		}
 	}
 	w.devices = w.devices[:0]
+	return errors.Join(errs...)
 }
 
 // Close closes all device files
@@ -173,8 +193,7 @@ func (w *Writer) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	w.closeDevices()
-	return nil
+	return w.closeDevices()
 }
 
 // DevicePaths returns the list of device paths
